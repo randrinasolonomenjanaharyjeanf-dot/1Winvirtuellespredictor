@@ -11,7 +11,7 @@
         android:usesCleartextTraffic="false">
 
         <activity
-            android:name=".MainActivity"
+            android:name="com.example.onewinvirtuellepredictor.MainActivity"
             android:exported="true">
 
             <intent-filter>
