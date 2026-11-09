@@ -16,14 +16,31 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.room.Room
+import kotlinx.coroutines.launch
 import kotlin.math.exp
 import kotlin.math.pow
 
 class MainActivity : ComponentActivity() {
+
+    private lateinit var database: MatchDatabase
+    private lateinit var analyzer: MatchAnalyzer
+    private lateinit var networkMonitor: NetworkMonitor
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        database = Room.databaseBuilder(
+            applicationContext,
+            MatchDatabase::class.java,
+            "onewin_database"
+        ).build()
+
+        analyzer = MatchAnalyzer(database)
+        networkMonitor = NetworkMonitor(applicationContext)
+
         setContent {
-            PredictorApp()
+            PredictorApp(analyzer, networkMonitor)
         }
     }
 }
@@ -93,11 +110,11 @@ object PredictionEngine {
         val awayAttack = average(awayTeam, awayHistory, true)
         val awayDefense = average(awayTeam, awayHistory, false)
 
-        val lambdaHome = ((homeAttack + awayDefense) / 2.0)
-            .coerceIn(0.15, 5.0)
+        val lambdaHome =
+            ((homeAttack + awayDefense) / 2.0).coerceIn(0.15, 5.0)
 
-        val lambdaAway = ((awayAttack + homeDefense) / 2.0)
-            .coerceIn(0.15, 5.0)
+        val lambdaAway =
+            ((awayAttack + homeDefense) / 2.0).coerceIn(0.15, 5.0)
 
         var h = 0.0
         var d = 0.0
@@ -106,7 +123,6 @@ object PredictionEngine {
 
         for (i in 0..8) {
             for (j in 0..8) {
-
                 val probability =
                     poisson(lambdaHome, i) *
                     poisson(lambdaAway, j)
@@ -132,14 +148,22 @@ object PredictionEngine {
 }
 
 @Composable
-fun PredictorApp() {
+fun PredictorApp(
+    analyzer: MatchAnalyzer,
+    networkMonitor: NetworkMonitor
+) {
 
     var homeTeam by remember { mutableStateOf("") }
     var awayTeam by remember { mutableStateOf("") }
-
     var history by remember { mutableStateOf("") }
     var result by remember { mutableStateOf<Prediction?>(null) }
     var error by remember { mutableStateOf("") }
+    var savedCount by remember { mutableIntStateOf(0) }
+
+    val scope = rememberCoroutineScope()
+    val isOnline by networkMonitor.isOnline.collectAsState(
+        initial = false
+    )
 
     val green = Color(0xFF00E69A)
     val dark = Color(0xFF0B1220)
@@ -167,6 +191,22 @@ fun PredictorApp() {
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold
             )
+
+            Spacer(Modifier.height(12.dp))
+
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = panel
+                ),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = if (isOnline) "● ONLINE" else "● OFFLINE",
+                    color = if (isOnline) green else Color.Yellow,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(14.dp)
+                )
+            }
 
             Spacer(Modifier.height(24.dp))
 
@@ -276,13 +316,16 @@ fun PredictorApp() {
                                     parts[1].isBlank() ||
                                     hg == null || ag == null ||
                                     hg < 0 || ag < 0
-                                ) null
-                                else Match(
-                                    parts[0],
-                                    parts[1],
-                                    hg,
-                                    ag
-                                )
+                                ) {
+                                    null
+                                } else {
+                                    Match(
+                                        parts[0],
+                                        parts[1],
+                                        hg,
+                                        ag
+                                    )
+                                }
                             }
                         }
 
@@ -295,16 +338,71 @@ fun PredictorApp() {
                     ) {
                         error = "Hamarino ny anaran'ny ekipa."
                     } else {
-                        val prediction = PredictionEngine.analyze(
-                            matches,
-                            homeTeam.trim(),
-                            awayTeam.trim()
-                        )
 
-                        if (prediction == null) {
-                            error = "Mbola tsy ampy ny historique ho an'ireo ekipa."
-                        } else {
-                            result = prediction
+                        scope.launch {
+                            try {
+
+                                val oldMatches = analyzer.analyze()
+
+                                matches.forEach { match ->
+
+                                    val alreadySaved = oldMatches.any {
+                                        it.homeTeam.equals(match.home, true) &&
+                                        it.awayTeam.equals(match.away, true) &&
+                                        it.homeGoals == match.homeGoals &&
+                                        it.awayGoals == match.awayGoals
+                                    }
+
+                                    if (!alreadySaved) {
+                                        analyzer.saveMatch(
+                                            MatchEntity(
+                                                homeTeam = match.home,
+                                                awayTeam = match.away,
+                                                homeGoals = match.homeGoals,
+                                                awayGoals = match.awayGoals
+                                            )
+                                        )
+                                    }
+                                }
+
+                                val savedMatches = analyzer.analyze()
+
+                                val databaseMatches = savedMatches.map {
+                                    Match(
+                                        it.homeTeam,
+                                        it.awayTeam,
+                                        it.homeGoals,
+                                        it.awayGoals
+                                    )
+                                }
+
+                                val prediction = PredictionEngine.analyze(
+                                    databaseMatches,
+                                    homeTeam.trim(),
+                                    awayTeam.trim()
+                                )
+
+                                if (prediction == null) {
+                                    error = "Mbola tsy ampy ny historique ho an'ireo ekipa."
+                                } else {
+
+                                    analyzer.savePrediction(
+                                        PredictionEntity(
+                                            homeTeam = homeTeam.trim(),
+                                            awayTeam = awayTeam.trim(),
+                                            homeProbability = prediction.home,
+                                            drawProbability = prediction.draw,
+                                            awayProbability = prediction.away
+                                        )
+                                    )
+
+                                    result = prediction
+                                    savedCount = analyzer.getPredictionHistory().size
+                                }
+
+                            } catch (e: Exception) {
+                                error = "Database error: ${e.message}"
+                            }
                         }
                     }
                 },
@@ -336,9 +434,7 @@ fun PredictorApp() {
                     ),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(
-                        Modifier.padding(18.dp)
-                    ) {
+                    Column(Modifier.padding(18.dp)) {
 
                         Text(
                             "PREDICTION RESULTS",
@@ -373,16 +469,12 @@ fun PredictorApp() {
                         )
 
                         Text(
-                            "$homeTeam: %.2f".format(
-                                prediction.expectedHome
-                            ),
+                            "$homeTeam: %.2f".format(prediction.expectedHome),
                             color = Color.White
                         )
 
                         Text(
-                            "$awayTeam: %.2f".format(
-                                prediction.expectedAway
-                            ),
+                            "$awayTeam: %.2f".format(prediction.expectedAway),
                             color = Color.White
                         )
 
@@ -409,8 +501,7 @@ fun PredictorApp() {
 
                         Text(
                             signal,
-                            color = if (best >= 55) green
-                                else Color.Yellow,
+                            color = if (best >= 55) green else Color.Yellow,
                             fontSize = 23.sp,
                             fontWeight = FontWeight.Black
                         )
@@ -427,13 +518,27 @@ fun PredictorApp() {
             Spacer(Modifier.height(25.dp))
 
             Text(
+                "ROOM DATABASE: ACTIVE",
+                color = green,
+                fontWeight = FontWeight.Bold
+            )
+
+            Text(
+                "Saved predictions: $savedCount",
+                color = Color.White,
+                fontSize = 13.sp
+            )
+
+            Spacer(Modifier.height(12.dp))
+
+            Text(
                 "DATA MODE: MANUAL",
                 color = green,
                 fontWeight = FontWeight.Bold
             )
 
             Text(
-                "Automatic data connection: pending API integration",
+                "Automatic data connection: API integration pending",
                 color = Color.LightGray,
                 fontSize = 12.sp
             )
