@@ -9,6 +9,18 @@ class MatchAnalyzer(
         return database.matchDao().getAllMatches()
     }
 
+    suspend fun saveMatch(match: MatchEntity) {
+        database.matchDao().insertMatch(match)
+    }
+
+    suspend fun savePrediction(prediction: PredictionEntity) {
+        database.matchDao().insertPrediction(prediction)
+    }
+
+    suspend fun getPredictionHistory(): List<PredictionEntity> {
+        return database.matchDao().getAllPredictions()
+    }
+
     fun calculateProbabilities(
         homeWins: Int,
         draws: Int,
