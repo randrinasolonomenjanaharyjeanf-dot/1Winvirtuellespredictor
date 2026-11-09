@@ -1,5 +1,5 @@
 
-package com.example.bettracker
+package com.example.onewinvirtuellepredictor
 
 class MatchAnalyzer(
     private val database: MatchDatabase
