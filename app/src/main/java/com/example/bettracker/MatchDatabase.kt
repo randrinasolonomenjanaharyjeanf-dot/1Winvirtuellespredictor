@@ -1,5 +1,5 @@
 
-package com.example.bettracker
+package com.example.onewinvirtuellepredictor
 
 import androidx.room.Dao
 import androidx.room.Database
