@@ -1,5 +1,5 @@
 
-package com.example.bettracker
+package com.example.onewinvirtuellepredictor
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
