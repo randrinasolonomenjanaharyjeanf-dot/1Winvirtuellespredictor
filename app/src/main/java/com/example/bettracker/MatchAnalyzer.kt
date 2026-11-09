@@ -1,17 +1,39 @@
 
-package com.example.winminespredictor
+package com.example.bettracker
 
 class MatchAnalyzer(
     private val database: MatchDatabase
 ) {
 
-    fun analyze(matchId: String): String {
-        val match = database.getMatch(matchId)
+    suspend fun analyze(): List<MatchEntity> {
+        return database.matchDao().getAllMatches()
+    }
 
-        return if (match != null) {
-            "Match found: $match"
-        } else {
-            "No matching data found"
+    fun calculateProbabilities(
+        homeWins: Int,
+        draws: Int,
+        awayWins: Int
+    ): Triple<Double, Double, Double> {
+
+        val total = homeWins + draws + awayWins
+
+        if (total == 0) {
+            return Triple(0.0, 0.0, 0.0)
         }
+
+        val homeProbability =
+            homeWins.toDouble() / total * 100
+
+        val drawProbability =
+            draws.toDouble() / total * 100
+
+        val awayProbability =
+            awayWins.toDouble() / total * 100
+
+        return Triple(
+            homeProbability,
+            drawProbability,
+            awayProbability
+        )
     }
 }
