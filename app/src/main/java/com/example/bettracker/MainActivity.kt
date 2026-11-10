@@ -161,9 +161,19 @@ fun PredictorApp(
     var savedCount by remember { mutableIntStateOf(0) }
 
     val scope = rememberCoroutineScope()
+
     val isOnline by networkMonitor.isOnline.collectAsState(
         initial = false
     )
+
+    // LOAD SAVED PREDICTIONS AUTOMATICALLY
+    LaunchedEffect(analyzer) {
+        try {
+            savedCount = analyzer.getPredictionHistory().size
+        } catch (e: Exception) {
+            error = "Database error: ${e.message}"
+        }
+    }
 
     val green = Color(0xFF00E69A)
     val dark = Color(0xFF0B1220)
@@ -397,7 +407,10 @@ fun PredictorApp(
                                     )
 
                                     result = prediction
-                                    savedCount = analyzer.getPredictionHistory().size
+
+                                    // REFRESH DATABASE COUNT
+                                    savedCount =
+                                        analyzer.getPredictionHistory().size
                                 }
 
                             } catch (e: Exception) {
